@@ -1,0 +1,23 @@
+# dependências
+node_modules
+
+# builds
+dist
+build
+*.tsbuildinfo
+
+# ambiente / segredos
+.env
+.env.*
+!.env.example
+
+# local / temporário
+*.local
+.cache
+
+# editor / SO
+.DS_Store
+Thumbs.db
+
+# Claude Code — config local da máquina (o resto de .claude/ pode ser versionado)
+.claude/settings.local.json

@@ -1,0 +1,3 @@
+# SPA fallback: toda rota cai no index.html (react-router cuida do resto).
+# Usado por Cloudflare Pages e Netlify. No Vercel o preset Vite já faz isso.
+/*    /index.html    200

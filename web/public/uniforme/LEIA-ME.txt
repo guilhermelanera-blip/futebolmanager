@@ -1,0 +1,19 @@
+MODELO DO UNIFORME (imagem base)
+================================
+
+Coloque aqui os recortes do SEU modelo de uniforme, com estes nomes exatos:
+
+  camisa.png   -> só a camisa (frente), recortada
+  calcao.png   -> só o calção
+  meiao.png    -> só o meião + chuteira (um par ou um pé)
+
+Assim que os arquivos existirem, a tela "Editar time" passa a usar essas
+imagens como base e as COR 1 / COR 2 / COR 3 do editor são aplicadas por
+cima (o branco vira a cor escolhida; preto/cinza continuam como detalhe).
+
+Dicas para o tint funcionar bem:
+- Imagens em TONS DE CINZA / BRANCO (sem cor), fundo transparente (PNG).
+- SEM número desenhado — o número é colocado pelo app por cima.
+- Enquadre a peça “cheia” no quadro, sem muita margem.
+
+Sem esses arquivos, o app usa o desenho vetorial padrão.

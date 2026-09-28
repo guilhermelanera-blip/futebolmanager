@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 72" role="img" aria-label="Liga Nacional de Futebol Manager">
+  <defs>
+    <linearGradient id="lg-sh" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#2a9760"/>
+      <stop offset="0.55" stop-color="#1c6b45"/>
+      <stop offset="1" stop-color="#0d4a2a"/>
+    </linearGradient>
+  </defs>
+  <path d="M32 3 L59 11 V33 C59 51 47 63 32 69 C17 63 5 51 5 33 V11 Z"
+        fill="url(#lg-sh)" stroke="#f2e7c6" stroke-width="2.6" stroke-linejoin="round"/>
+  <path d="M32 8 L54 14.5 V33 C54 47 44 57.5 32 63 C20 57.5 10 47 10 33 V14.5 Z"
+        fill="none" stroke="#f2e7c6" stroke-width="1" opacity="0.32"/>
+  <polygon points="32,8.80 32.91,11.25 35.52,11.36 33.47,12.98 34.17,15.49 32,14.05 29.83,15.49 30.53,12.98 28.48,11.36 31.09,11.25"
+           fill="#f4cf5e"/>
+  <g fill="none" stroke="#f4ecd6" stroke-width="2" stroke-linecap="round" opacity="0.92">
+    <path d="M12 41 H52"/>
+    <circle cx="32" cy="41" r="9"/>
+  </g>
+  <circle cx="32" cy="41" r="4.6" fill="#ffffff"/>
+  <polygon points="32,38.85 34.05,40.34 33.26,42.74 30.74,42.74 29.95,40.34" fill="#123320"/>
+</svg>

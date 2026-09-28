@@ -1,0 +1,486 @@
+// Schema da Fase 1 (MVP) do 20_ROADMAP.
+// Escopo desta fase: Liga Nacional unica, motor de partida simplificado,
+// mercado basico, financas basicas. Copa Nacional/Continental, base/juniores,
+// chat e IA narrativa entram em fases seguintes (ver docs/20_ROADMAP.md).
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ---------- Contas e liga ----------
+
+model Usuario {
+  id               String   @id @default(uuid())
+  email            String   @unique // 18_SEGURANCA, seção 5 - e-mail único por conta
+  senhaHash        String   // hash bcrypt (18, seção 1)
+  nome             String
+  consentimentoEm  DateTime // consentimento LGPD registrado no cadastro (18, seção 4)
+  criadoEm         DateTime @default(now())
+  clube            Clube?   @relation("PresidenteDoClube")
+  sessoes          Sessao[]
+  filaDeEspera     FilaDeEspera[]
+}
+
+// Sessão de autenticação (18, seção 1): token opaco com expiração, revogável.
+// O API server continua stateless (19, seção 1) - apenas consulta esta tabela.
+model Sessao {
+  id         String    @id @default(uuid())
+  token      String    @unique
+  usuario    Usuario   @relation(fields: [usuarioId], references: [id], onDelete: Cascade)
+  usuarioId  String
+  criadoEm   DateTime  @default(now())
+  expiraEm   DateTime
+  revogadaEm DateTime?
+
+  @@index([usuarioId])
+}
+
+// Log de segurança mantido SEPARADO dos logs de jogo (18, seção 6):
+// tentativas de login, criação/exclusão de conta, mudança de controle de clube.
+model LogSeguranca {
+  id        String   @id @default(uuid())
+  // LOGIN_OK | LOGIN_FALHA | REGISTRO | EXCLUSAO_CONTA | ASSUMIR_CLUBE
+  // | FALENCIA | GESTAO_VIRTUAL_INATIVIDADE | FILA_ATENDIDA
+  tipo      String
+  usuarioId String?
+  email     String?
+  ip        String?
+  detalhe   String?
+  criadoEm  DateTime @default(now())
+
+  @@index([tipo, criadoEm])
+}
+
+model Liga {
+  id            String       @id @default(uuid())
+  nome          String
+  vagasHumanas  Int          @default(20) // R8/R9 - 00_REGRAS_IMUTAVEIS
+  calendarioIniciado Boolean @default(false) // trava novas entradas apos inicio (07, secao 2)
+  clubes        Clube[]
+  temporadas    Temporada[]
+  filaDeEspera  FilaDeEspera[]
+}
+
+// Fila de espera por vagas de clube reabertas (16 secao 1; 07 secao 2):
+// quando um clube humano vai para gestao virtual por inatividade (R40), a
+// vaga e oferecida ao primeiro da fila (ordem de chegada).
+model FilaDeEspera {
+  id               String   @id @default(uuid())
+  liga             Liga     @relation(fields: [ligaId], references: [id])
+  ligaId           String
+  usuario          Usuario  @relation(fields: [usuarioId], references: [id], onDelete: Cascade)
+  usuarioId        String
+  status           String   @default("AGUARDANDO") // AGUARDANDO | ATENDIDA | CANCELADA
+  criadoEm         DateTime @default(now())
+  atendidaEm       DateTime?
+  clubeAtribuidoId String?
+
+  @@unique([ligaId, usuarioId, status])
+  @@index([ligaId, status, criadoEm])
+}
+
+// ---------- Clube ----------
+
+enum TipoClube {
+  HUMANO
+  IA
+  SAF // clube adquirido apos falencia (05, secao 7-8)
+}
+
+model Clube {
+  id               String   @id @default(uuid())
+  liga             Liga     @relation(fields: [ligaId], references: [id])
+  ligaId           String
+  nome             String
+  cores            String?
+  escudoUrl        String?
+  tipo             TipoClube @default(IA)
+
+  presidente       Usuario? @relation("PresidenteDoClube", fields: [presidenteId], references: [id])
+  presidenteId     String?  @unique
+
+  // 12_IA_DOS_CLUBES, secao 1 - so relevante quando tipo != HUMANO
+  perfilAgressividadeMercado   Float? // 0-1
+  perfilToleranciaRisco        Float? // 0-1
+  perfilPosturaTatica          Float? // 0 (defensivo) - 1 (ofensivo)
+  perfilValorizaJovens         Float? // 0 (prefere experientes) - 1 (prefere jovens em formacao)
+  perfilArquetipo              String? // GASTADOR | FORMADOR | CONSERVADOR | EQUILIBRADO | AMBICIOSO
+
+  reputacao        Int      @default(50) // 0-100, 05 secao 5
+  moralTorcida     Int      @default(50) // 0-100, 05 secao 5
+
+  nivelEstadio     Int      @default(1) // 05 secao 6 / 11 secao 7
+  nivelCT          Int      @default(1)
+  capacidadeEstadio Int     @default(20000) // 11 secao 1 (bilheteria)
+  precoIngresso    Float    @default(80)    // 11 secao 1 - lever do presidente
+
+  saldoCaixa       Float    @default(0) // 11
+
+  // Estado do critério de falencia por caixa (11, secao 6):
+  // caixa negativo por N dias consecutivos + folha do mes nao paga.
+  diasCaixaNegativoConsecutivos Int @default(0)
+  folhaEmAtraso                 Boolean @default(false)
+
+  // Relacao com o Conselho (11 §4): 0-100, cai a cada voto formal contra um
+  // gasto exagerado e se recupera devagar. O Conselho NUNCA tem poder de veto.
+  relacaoConselho  Int      @default(70)
+
+  ultimaAcaoEm     DateTime @default(now()) // usado p/ regra de 14 dias, R40
+
+  jogadores        Jogador[]
+  movimentacoes    MovimentacaoFinanceira[]
+  alertas          AlertaFinanceiro[]
+  votosConselho    VotoConselho[]
+  mandante         Partida[] @relation("Mandante")
+  visitante        Partida[] @relation("Visitante")
+
+  criadoEm         DateTime @default(now())
+}
+
+// Historico de alertas financeiros por nivel (11 §5; 16 §1). Um alerta fica
+// ABERTO enquanto a condicao persiste e e resolvido quando ela some.
+model AlertaFinanceiro {
+  id          String    @id @default(uuid())
+  clube       Clube     @relation(fields: [clubeId], references: [id])
+  clubeId     String
+  nivel       Int       // 1 (atencao) | 2 (risco) | 3 (critico)
+  // PROJECAO_CAIXA_NEGATIVO | DIVIDA_ALTA | CAIXA_NEGATIVO_PROLONGADO | FOLHA_EM_ATRASO
+  tipo        String
+  detalhe     String
+  criadoEm    DateTime  @default(now())
+  resolvidoEm DateTime?
+
+  @@index([clubeId, resolvidoEm])
+}
+
+// Voto formal do Conselho contra um gasto acima do limite (11 §4). NAO
+// bloqueia a operacao — e registro publico + efeito na relacao.
+model VotoConselho {
+  id         String   @id @default(uuid())
+  clube      Clube    @relation(fields: [clubeId], references: [id])
+  clubeId    String
+  operacao   String   // descricao curta da operacao
+  valor      Float
+  limite     Float    // limite que foi ultrapassado
+  detalhe    String
+  criadoEm   DateTime @default(now())
+
+  @@index([clubeId, criadoEm])
+}
+
+// Razao financeiro append-only (16, secoes 3-4): toda receita/despesa gera um
+// registro imutavel; Clube.saldoCaixa e a projecao derivada desses registros.
+model MovimentacaoFinanceira {
+  id          String   @id @default(uuid())
+  clube       Clube    @relation(fields: [clubeId], references: [id])
+  clubeId     String
+  // RECEITA_BILHETERIA | RECEITA_PATROCINIO | RECEITA_PREMIACAO |
+  // RECEITA_TRANSFERENCIA | DESPESA_SALARIO | DESPESA_MANUTENCAO |
+  // DESPESA_SCOUTING | DESPESA_TRANSFERENCIA
+  tipo        String
+  valor       Float    // sempre >= 0; o sinal vem do prefixo RECEITA_/DESPESA_
+  saldoApos   Float    // saldo do clube apos aplicar este lancamento
+  descricao   String
+  temporadaId String?
+  partidaId   String?
+  criadoEm    DateTime @default(now())
+
+  @@index([clubeId, criadoEm])
+}
+
+// ---------- Jogador ----------
+
+enum Posicao {
+  GOLEIRO
+  ZAGUEIRO
+  LATERAL
+  VOLANTE
+  MEIA
+  PONTA
+  ATACANTE
+}
+
+model Jogador {
+  id            String   @id @default(uuid())
+  clube         Clube?   @relation(fields: [clubeId], references: [id])
+  clubeId       String?
+  nome          String
+  idade         Int
+  posicao       Posicao
+
+  // Atributos 1-20, escala definida em 04_SISTEMA_DE_JOGADORES
+  finalizacao   Int @default(10)
+  passe         Int @default(10)
+  drible        Int @default(10)
+  cabeceio      Int @default(10)
+  cruzamento    Int @default(10)
+  marcacao      Int @default(10)
+  desarme       Int @default(10)
+  velocidade    Int @default(10)
+  resistencia   Int @default(10)
+  forca         Int @default(10)
+  visaoDeJogo   Int @default(10)
+  posicionamento Int @default(10)
+
+  // Especificos de goleiro (irrelevantes p/ outras posicoes)
+  reflexos      Int @default(10)
+  saidaDeGol    Int @default(10)
+
+  potencialOculto Int   @default(10) // 04, secao 4 - nao exposto diretamente na API
+  moral         Int     @default(60) // 0-100
+  fadiga        Int     @default(0)  // 0-100
+  formaRecente  Float   @default(0)  // modulador de curto prazo, 04 secao 5
+
+  // Tracos de personalidade (04 secao 10): slugs separados por virgula, ex.
+  // "GOLEADOR,REFERENCIA_VESTIARIO". Catalogo e efeitos em modules/jogador/tracos.ts
+  tracos        String   @default("")
+
+  // Idempotencia da evolucao anual (08 secao 6): guarda a temporada cuja
+  // virada ja aplicou idade+atributos a este jogador.
+  ultimaEvolucaoTemporadaId String?
+
+  // Emprestimo em andamento (09, secao 1). Quando setado, `clubeId` e o clube
+  // TOMADOR e `emprestadoDeClubeId` e o clube DONO (paga o restante da folha).
+  emprestadoDeClubeId  String?
+  emprestimoFim        DateTime?
+  emprestimoPercSalario Float?  // 0..1 - fracao da folha paga pelo clube tomador
+
+  contrato      Contrato?
+  lesoes        Lesao[]
+
+  criadoEm      DateTime @default(now())
+}
+
+// Lesao com janela de recuperacao (04 secao 7; progride no tick diario, 08 secao 1).
+model Lesao {
+  id            String   @id @default(uuid())
+  jogador       Jogador  @relation(fields: [jogadorId], references: [id])
+  jogadorId     String
+  gravidade     String   // LEVE | MODERADA | GRAVE
+  diasTotais    Int
+  diasRestantes Int
+  origem        String   // PARTIDA | TREINO
+  partidaId     String?
+  inicioEm      DateTime @default(now())
+  status        String   @default("ATIVA") // ATIVA | RECUPERADO
+
+  @@index([status])
+  @@index([jogadorId, status])
+}
+
+model Contrato {
+  id            String   @id @default(uuid())
+  jogador       Jogador  @relation(fields: [jogadorId], references: [id])
+  jogadorId     String   @unique
+  salarioSemanal Float
+  inicio        DateTime
+  fim           DateTime
+  clausulaRescisao Float?
+  luvas         Float?
+  bonus         BonusContrato[]
+}
+
+// Bonus por desempenho (09 §4). Metas avaliadas na virada de temporada
+// (08 §6). Pago pelo clube ao jogador.
+model BonusContrato {
+  id              String   @id @default(uuid())
+  contrato        Contrato @relation(fields: [contratoId], references: [id], onDelete: Cascade)
+  contratoId      String
+  // GOLS_NA_TEMPORADA | TITULO_LIGA | TITULO_COPA
+  tipo            String
+  meta            Int      @default(1) // GOLS: nº de gols; títulos: 1
+  valor           Float
+  pagoEm          DateTime?
+  temporadaPagaId String?  // idempotência: temporada em que a meta foi paga
+  criadoEm        DateTime @default(now())
+
+  @@index([contratoId])
+}
+
+// Mais-valia em revenda / sell-on fee (09 §4). Percentual retido pelo clube
+// vendedor original; pago quando o jogador é revendido a um terceiro clube.
+model SellOn {
+  id                    String   @id @default(uuid())
+  jogadorId             String
+  clubeBeneficiarioId   String   // clube que retém o percentual
+  percentual            Float    // 0..limite configurável
+  origemTransferenciaId String?
+  criadoEm              DateTime @default(now())
+
+  @@index([jogadorId])
+  @@index([clubeBeneficiarioId])
+}
+
+// ---------- Competicao e calendario ----------
+
+model Temporada {
+  id            String   @id @default(uuid())
+  liga          Liga     @relation(fields: [ligaId], references: [id])
+  ligaId        String
+  numero        Int
+  inicio        DateTime
+  fimPrevisto   DateTime?
+  status        String   @default("EM_ANDAMENTO") // EM_ANDAMENTO | ENCERRADA
+  partidas      Partida[]
+  confrontosCopa ConfrontoCopa[]
+}
+
+// Confronto (chave) da Copa Nacional — 00 R34, 06 secao 2. Ida e volta a
+// partir das oitavas; preliminar de jogo unico so na T1 expandida (R38).
+// Os confrontos de todas as fases sao criados no inicio da temporada com as
+// datas ja reservadas; clubeA/clubeB das fases seguintes sao preenchidos
+// conforme os confrontos anteriores se encerram.
+model ConfrontoCopa {
+  id               String   @id @default(uuid())
+  temporada        Temporada @relation(fields: [temporadaId], references: [id])
+  temporadaId      String
+  fase             String   // PRELIMINAR | OITAVAS | QUARTAS | SEMIS | FINAL
+  ordem            Int      // posicao no bracket dentro da fase (0-based)
+  jogoUnico        Boolean  @default(false)
+
+  clubeAId         String?
+  clubeBId         String?
+  mandoVoltaClubeId String? // quem joga a VOLTA em casa (sorteio, R34)
+
+  dataIdaPrevista   DateTime?
+  dataVoltaPrevista DateTime?
+
+  partidaIdaId     String?
+  partidaVoltaId   String?
+
+  golsAgregadoA    Int?
+  golsAgregadoB    Int?
+  penaltisA        Int?
+  penaltisB        Int?
+  vencedorId       String?
+  status           String   @default("AGUARDANDO") // AGUARDANDO | EM_ANDAMENTO | ENCERRADO
+
+  criadoEm         DateTime @default(now())
+
+  @@index([temporadaId, fase, ordem])
+  @@index([temporadaId, status])
+}
+
+model Partida {
+  id            String   @id @default(uuid())
+  temporada     Temporada @relation(fields: [temporadaId], references: [id])
+  temporadaId   String
+  competicao    String    @default("LIGA_NACIONAL") // LIGA_NACIONAL | COPA_NACIONAL
+  rodada        Int
+  confrontoCopaId String? // set quando competicao = COPA_NACIONAL (06 secao 2)
+
+  mandante      Clube    @relation("Mandante", fields: [mandanteId], references: [id])
+  mandanteId    String
+  visitante     Clube    @relation("Visitante", fields: [visitanteId], references: [id])
+  visitanteId   String
+
+  dataHora      DateTime // sempre 21h (qua/qui) ou 15h (dom), horario America/Sao_Paulo - 00 R30
+
+  seed          String   // seed deterministico da simulacao, 03 secao 10
+  golsMandante  Int?
+  golsVisitante Int?
+  status        String   @default("AGENDADA") // AGENDADA | EM_ANDAMENTO | ENCERRADA
+
+  eventos       EventoPartida[]
+
+  criadoEm      DateTime @default(now())
+}
+
+model EventoPartida {
+  id          String   @id @default(uuid())
+  partida     Partida  @relation(fields: [partidaId], references: [id])
+  partidaId   String
+  minuto      Int
+  tipo        String   // GOL | CARTAO_AMARELO | CARTAO_VERMELHO | LESAO | SUBSTITUICAO
+  clubeId     String?
+  jogadorId   String?
+  detalhe     String?
+}
+
+// ---------- Mercado (09) ----------
+
+model TransferenciaMercado {
+  id                String   @id @default(uuid())
+  jogadorId         String
+  tipo              String   // COMPRA | EMPRESTIMO | LIVRE (09, secao 1)
+
+  clubeProponenteId String   // clube que quer o jogador
+  clubeDetentorId   String?  // clube atual do jogador; null quando jogador livre
+
+  // Acordo entre clubes (COMPRA: taxa de transferencia; EMPRESTIMO: taxa de emprestimo)
+  valor             Float    @default(0)
+  // Especifico de EMPRESTIMO
+  emprestimoFim              DateTime?
+  emprestimoPercSalarioTomador Float?   // 0..1 (divisao de salario, 09 secao 1)
+
+  // Termos oferecidos ao jogador (09, secao 4)
+  salarioSemanal    Float
+  duracaoAnos       Int
+  luvas             Float    @default(0)
+  clausulaRescisao  Float?
+  // Sell-on fee retido pelo clube detentor numa venda futura (09 §4). 0..limite.
+  sellOnPercentual  Float?
+  // Bonus por desempenho oferecidos ao jogador, como JSON:
+  // [{ "tipo": "GOLS_NA_TEMPORADA", "meta": 15, "valor": 500000 }, ...]
+  bonusJson         String?
+
+  // AGUARDANDO_DETENTOR | AGUARDANDO_PROPONENTE | AGUARDANDO_JOGADOR
+  // | CONCLUIDA | RECUSADA_DETENTOR | RECUSADA_JOGADOR | EXPIRADA | CANCELADA
+  status            String   @default("AGUARDANDO_DETENTOR")
+  motivo            String?  // texto curto explicando recusa/contraproposta
+
+  criadoEm          DateTime @default(now())
+  atualizadoEm      DateTime @updatedAt
+  expiraEm          DateTime // 09, secao 2 - prazo de validade
+  concluidaEm       DateTime?
+
+  @@index([status, expiraEm])
+  @@index([jogadorId, status])
+  @@index([clubeProponenteId, status])
+}
+
+// ---------- Chat (07 secao 4; moderacao 18 secao 3) ----------
+
+model MensagemChat {
+  id         String   @id @default(uuid())
+  ligaId     String
+  canal      String   // LIGA (grupo) | PARTICULAR (1:1)
+  // Para PARTICULAR: id deterministico do par de usuarios ("menorId:maiorId").
+  // Null para o canal aberto da liga.
+  conversaId String?
+  autorId    String
+  texto      String
+  criadoEm   DateTime @default(now())
+  removidaEm DateTime? // moderacao: soft-delete, mantem o registro
+
+  denuncias  DenunciaChat[]
+
+  @@index([ligaId, canal, criadoEm])
+  @@index([conversaId, criadoEm])
+}
+
+model DenunciaChat {
+  id            String   @id @default(uuid())
+  mensagem      MensagemChat @relation(fields: [mensagemId], references: [id], onDelete: Cascade)
+  mensagemId    String
+  denuncianteId String
+  motivo        String?
+  status        String   @default("ABERTA") // ABERTA | ANALISADA
+  criadoEm      DateTime @default(now())
+
+  @@unique([mensagemId, denuncianteId]) // uma denuncia por usuario por mensagem
+  @@index([status, criadoEm])
+}
+
+// ---------- Configuracao central (11, secao 8) ----------
+
+model ParametroConfiguravel {
+  chave         String   @id
+  valor         String   // armazenado como string/JSON, interpretado pela aplicacao
+  descricao     String?
+}
