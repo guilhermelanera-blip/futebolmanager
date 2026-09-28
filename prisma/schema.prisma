@@ -9,7 +9,11 @@ generator client {
 
 datasource db {
   provider = "postgresql"
-  url      = env("DATABASE_URL")
+  // Runtime (consultas): conexão via pooler — necessário em ambiente
+  // serverless (Vercel), que a conexão direta do Supabase não alcança bem.
+  url       = env("DATABASE_URL")
+  // Só para `prisma migrate` (CLI, roda do seu computador): conexão direta.
+  directUrl = env("DIRECT_URL")
 }
 
 // ---------- Contas e liga ----------
