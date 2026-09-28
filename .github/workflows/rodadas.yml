@@ -1,0 +1,20 @@
+name: Relógio da liga — disparo das rodadas
+
+# Quarta e quinta às 21:00 e domingo às 15:00, horário de Brasília (R17/R30).
+# Convertido pra UTC (BRT = UTC-3, fixo): quarta 21h BRT = quinta 00h UTC;
+# quinta 21h BRT = sexta 00h UTC; domingo 15h BRT = domingo 18h UTC.
+on:
+  schedule:
+    - cron: "0 0 * * 4" # quarta 21h BRT
+    - cron: "0 0 * * 5" # quinta 21h BRT
+    - cron: "0 18 * * 0" # domingo 15h BRT
+  workflow_dispatch: {}
+
+jobs:
+  disparar:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Chamar /v1/scheduler/rodada
+        run: |
+          curl -fsS -X POST "${{ secrets.API_URL }}/v1/scheduler/rodada" \
+            -H "x-cron-secret: ${{ secrets.CRON_SECRET }}"

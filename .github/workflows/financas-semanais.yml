@@ -1,0 +1,17 @@
+name: Relógio da liga — ciclo financeiro semanal
+
+# Segunda 04:00 America/Sao_Paulo (07:00 UTC), depois do fim de semana de
+# jogos: patrocínio (+), folha (-), manutenção (-).
+on:
+  schedule:
+    - cron: "0 7 * * 1"
+  workflow_dispatch: {}
+
+jobs:
+  financas:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Chamar /v1/scheduler/financas-semanais
+        run: |
+          curl -fsS -X POST "${{ secrets.API_URL }}/v1/scheduler/financas-semanais" \
+            -H "x-cron-secret: ${{ secrets.CRON_SECRET }}"
