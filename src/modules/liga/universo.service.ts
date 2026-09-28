@@ -42,6 +42,9 @@ export async function criarUniverso(
   });
   const inicioContratos = params.dataInicioContratos ?? new Date();
 
+  // timeout maior que o padrão (5s): a transação cria ~20 clubes + ~500
+  // jogadores + ~500 contratos, e o padrão estoura fácil assim que o banco
+  // deixa de ser local (latência de rede até o Postgres na nuvem).
   return prisma.$transaction(async (tx) => {
     const liga = await tx.liga.create({
       data: { nome: universo.nomeLiga },
@@ -110,5 +113,5 @@ export async function criarUniverso(
       qtdeClubes: universo.clubes.length,
       qtdeJogadores: jogadoresData.length,
     };
-  });
+  }, { timeout: 60_000, maxWait: 15_000 });
 }
