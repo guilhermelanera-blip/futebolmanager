@@ -16,8 +16,22 @@ function autorizado(req: Request): boolean {
   return req.get("x-cron-secret") === segredo;
 }
 
+// TEMPORÁRIO — só pra descobrir por que "autorizado" está falhando em
+// produção. Não expõe os valores em si, só presença/tamanho. Remover depois
+// de resolvido.
+function diagnostico(req: Request) {
+  const segredo = process.env.CRON_SECRET;
+  const recebido = req.get("x-cron-secret");
+  return {
+    segredoConfigurado: !!segredo,
+    tamanhoSegredo: segredo?.length ?? 0,
+    headerRecebido: !!recebido,
+    tamanhoHeader: recebido?.length ?? 0,
+  };
+}
+
 cronRouter.post("/tick", async (req, res) => {
-  if (!autorizado(req)) return res.status(401).json({ erro: "não autorizado" });
+  if (!autorizado(req)) return res.status(401).json({ erro: "não autorizado", debug: diagnostico(req) });
   try {
     const resumo = await tickDiario(new Date());
     res.json({ ok: true, resumo });
